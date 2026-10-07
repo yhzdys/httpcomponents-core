@@ -26,7 +26,6 @@
  */
 package org.apache.hc.core5.reactor;
 
-
 import java.net.UnknownHostException;
 import java.time.Clock;
 import java.time.Instant;
@@ -34,6 +33,10 @@ import java.time.LocalDateTime;
 import java.time.Month;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.Future;
 
 import org.apache.hc.core5.concurrent.FutureCallback;
@@ -211,9 +214,32 @@ class TestAbstractIOSessionPool {
         Assertions.assertNotNull(entry2);
         entry2.session = ioSession2;
 
-        impl.enumAvailable(ioSession -> ioSession.close(CloseMode.GRACEFUL));
-        Mockito.verify(ioSession1).close(CloseMode.GRACEFUL);
-        Mockito.verify(ioSession2).close(CloseMode.GRACEFUL);
+        Mockito.doReturn(true).when(ioSession1).isOpen();
+        Mockito.doReturn(true).when(ioSession2).isOpen();
+
+        final Map<String, IOSession> sessionMap = new LinkedHashMap<>();
+        impl.enumAvailable(sessionMap::put);
+
+        Assertions.assertEquals(sessionMap.keySet(), new HashSet<>(Arrays.asList("host1", "host2")));
+    }
+
+    @Test
+    void testEnumSessionsWithClosedSession() {
+        final AbstractIOSessionPool.PoolEntry entry1 = impl.getPoolEntry("host1");
+        Assertions.assertNotNull(entry1);
+        entry1.session = ioSession1;
+
+        final AbstractIOSessionPool.PoolEntry entry2 = impl.getPoolEntry("host2");
+        Assertions.assertNotNull(entry2);
+        entry2.session = ioSession2;
+
+        Mockito.doReturn(false).when(ioSession1).isOpen();
+        Mockito.doReturn(true).when(ioSession2).isOpen();
+
+        final Map<String, IOSession> sessionMap = new LinkedHashMap<>();
+        impl.enumAvailable(sessionMap::put);
+
+        Assertions.assertEquals(sessionMap.keySet(), new HashSet<>(Arrays.asList("host2")));
     }
 
     @Test
@@ -282,9 +308,11 @@ class TestAbstractIOSessionPool {
         Assertions.assertNotNull(entry2);
         entry2.session = ioSession2;
 
+        Mockito.doReturn(true).when(ioSession1).isOpen();
         Mockito.doReturn(true).when(impl).isIdle(ioSession1);
         Mockito.doReturn(Instant.now(clock).minusSeconds(1).toEpochMilli())
                 .when(ioSession1).getLastEventTime();
+        Mockito.doReturn(true).when(ioSession2).isOpen();
         Mockito.doReturn(false).when(impl).isIdle(ioSession2);
 
         impl.closeIdle(null);
@@ -303,9 +331,11 @@ class TestAbstractIOSessionPool {
         Assertions.assertNotNull(entry2);
         entry2.session = ioSession2;
 
+        Mockito.doReturn(true).when(ioSession1).isOpen();
         Mockito.doReturn(true).when(impl).isIdle(ioSession1);
         Mockito.doReturn(Instant.now(clock).minusSeconds(1).toEpochMilli())
                 .when(ioSession1).getLastEventTime();
+        Mockito.doReturn(true).when(ioSession2).isOpen();
         Mockito.doReturn(true).when(impl).isIdle(ioSession2);
         Mockito.doReturn(Instant.now(clock).toEpochMilli())
                 .when(ioSession2).getLastEventTime();
@@ -313,6 +343,50 @@ class TestAbstractIOSessionPool {
         impl.closeIdle(TimeValue.ofSeconds(1));
 
         Mockito.verify(impl).closeSession(ioSession1, CloseMode.GRACEFUL);
+        Mockito.verify(impl, Mockito.never()).closeSession(Mockito.same(ioSession2), Mockito.any());
+    }
+
+    @Test
+    void testEvictExpired() {
+        final AbstractIOSessionPool.PoolEntry entry1 = impl.getPoolEntry("host1");
+        Assertions.assertNotNull(entry1);
+        entry1.session = ioSession1;
+
+        final AbstractIOSessionPool.PoolEntry entry2 = impl.getPoolEntry("host2");
+        Assertions.assertNotNull(entry2);
+        entry2.session = ioSession2;
+
+        Mockito.doReturn(true).when(ioSession1).isOpen();
+        Mockito.doReturn(true).when(impl).isIdle(ioSession1);
+        Mockito.doReturn(true).when(impl).isExpired("host1", ioSession1);
+        Mockito.doReturn(true).when(ioSession2).isOpen();
+        Mockito.doReturn(true).when(impl).isIdle(ioSession2);
+        Mockito.doReturn(false).when(impl).isExpired("host2", ioSession2);
+
+        impl.evictExpired();
+
+        Mockito.verify(impl).closeSession(ioSession1, CloseMode.GRACEFUL);
+        Mockito.verify(impl, Mockito.never()).closeSession(Mockito.same(ioSession2), Mockito.any());
+    }
+
+    @Test
+    void testEvictExpiredNonIdleDoNotGetEvicted() {
+        final AbstractIOSessionPool.PoolEntry entry1 = impl.getPoolEntry("host1");
+        Assertions.assertNotNull(entry1);
+        entry1.session = ioSession1;
+
+        final AbstractIOSessionPool.PoolEntry entry2 = impl.getPoolEntry("host2");
+        Assertions.assertNotNull(entry2);
+        entry2.session = ioSession2;
+
+        Mockito.doReturn(true).when(ioSession1).isOpen();
+        Mockito.doReturn(false).when(impl).isIdle(ioSession1);
+        Mockito.doReturn(true).when(ioSession2).isOpen();
+        Mockito.doReturn(false).when(impl).isIdle(ioSession2);
+
+        impl.evictExpired();
+
+        Mockito.verify(impl, Mockito.never()).closeSession(Mockito.same(ioSession1), Mockito.any());
         Mockito.verify(impl, Mockito.never()).closeSession(Mockito.same(ioSession2), Mockito.any());
     }
 

@@ -157,7 +157,7 @@ public final class H2ConnPool extends AbstractIOSessionPool<HttpHost> {
             final TimeValue inactivityTime = validateAfterInactivity;
             if (TimeValue.isNonNegative(inactivityTime)) {
                 // Last tolerable point of inactivity
-                final long deadline = inactivityDeadline(inactivityTime);
+                final long deadline = clockMillis() - inactivityTime.toMilliseconds();
                 if (ioSession.getLastEventTime() <= deadline) {
                     ioSession.enqueue(new StaleCheckCommand(callback::execute), Command.Priority.NORMAL);
                     return;
@@ -176,17 +176,6 @@ public final class H2ConnPool extends AbstractIOSessionPool<HttpHost> {
             return ((HttpConnection) handler).isIdle();
         }
         return false;
-    }
-
-    /**
-     * Evict expired (closed) sessions.
-     * @since 5.5
-     */
-    public void evictExpired() {
-        // This will cause closed sessions to get removed from the pool
-        enumAvailable(e -> {
-            // no op
-        });
     }
 
 }
